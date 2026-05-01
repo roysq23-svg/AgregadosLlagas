@@ -36,7 +36,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .brand-text{font-family:'Syne',sans-serif;font-weight:700;font-size:17px;letter-spacing:-.4px}
 .brand-sub{font-size:11px;opacity:.5;margin-top:-2px}
 .sync-badge{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:5px 12px;font-size:12px;opacity:.8}
-.sync-dot{width:7px;height:7px;border-radius:50%;background:#4ade80}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;transition:background .3s}
 .sync-dot.syncing{background:var(--accent);animation:pulse 1s infinite}
 .sync-dot.error{background:#f87171}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -88,16 +88,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* TOAST */
-.toast{position:fixed;bottom:24px;right:24px;background:var(--text);color:#f5f3ee;border-radius:12px;padding:12px 20px;font-size:13px;font-weight:500;box-shadow:var(--shadow-lg);transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1);z-index:999}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--text);color:#f5f3ee;border-radius:12px;padding:12px 20px;font-size:13px;font-weight:500;box-shadow:var(--shadow-lg);transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1);z-index:999;max-width:320px}
 .toast.show{transform:translateY(0);opacity:1}
 .toast.success{background:#166534}
 .toast.error{background:#991b1b}
 
 /* LOADING OVERLAY */
-.loading-overlay{position:fixed;inset:0;background:rgba(245,243,238,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:14px;backdrop-filter:blur(2px)}
+.loading-overlay{position:fixed;inset:0;background:rgba(245,243,238,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:14px;backdrop-filter:blur(3px)}
 .loading-overlay.hidden{display:none}
 .loading-text{font-family:'Syne',sans-serif;font-size:14px;font-weight:600;color:var(--muted)}
 .big-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+
+/* ERROR BANNER */
+.error-banner{background:var(--danger-light);border:1.5px solid #f5c0c0;border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.5rem;display:none;align-items:center;gap:12px;font-size:13px}
+.error-banner.show{display:flex}
+.error-banner strong{color:var(--danger);font-family:'Syne',sans-serif}
+.btn-retry{margin-left:auto;background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
+.btn-retry:hover{opacity:.85}
 
 /* TABLE */
 .table-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
@@ -197,7 +204,7 @@ tbody tr:hover td{background:var(--bg)}
   </div>
   <div class="sync-badge">
     <div class="sync-dot" id="sync-dot"></div>
-    <span id="sync-label">Conectado</span>
+    <span id="sync-label">Conectando...</span>
   </div>
 </div>
 
@@ -211,12 +218,21 @@ tbody tr:hover td{background:var(--bg)}
 
 <div class="container">
 
+  <!-- ERROR BANNER -->
+  <div class="error-banner" id="error-banner">
+    <div>
+      <strong>Sin conexión con Google Sheets</strong><br>
+      <span style="color:var(--muted)">Verifica que el script esté publicado como aplicación web y que tenga acceso público.</span>
+    </div>
+    <button class="btn-retry" onclick="cargarViajes()">Reintentar</button>
+  </div>
+
   <!-- STATS -->
   <div class="stats-strip">
     <div class="stat-card">
       <div class="stat-label">Viajes hoy</div>
       <div class="stat-value" id="s-hoy">—</div>
-      <div class="stat-sub">registros del dia</div>
+      <div class="stat-sub">registros del día</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Cubos totales</div>
@@ -301,7 +317,7 @@ tbody tr:hover td{background:var(--bg)}
             <option>Hormigon</option>
             <option>Otro</option>
           </select>
-          <button class="btn-reload" onclick="cargarViajes()">&#8635; Actualizar</button>
+          <button class="btn-reload" onclick="cargarViajes()">↻ Actualizar</button>
           <button class="btn-export" onclick="exportarCSV()">Exportar CSV</button>
         </div>
       </div>
@@ -323,7 +339,7 @@ tbody tr:hover td{background:var(--bg)}
         </table>
         <div class="empty-state" id="tabla-empty" style="display:none">
           <div class="empty-icon">📦</div>
-          <p>No hay viajes que coincidan.</p>
+          <p>No hay viajes que coincidan con los filtros.</p>
         </div>
       </div>
       <div style="padding:10px 14px;background:var(--bg);border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;color:var(--muted)">
@@ -342,9 +358,9 @@ tbody tr:hover td{background:var(--bg)}
     <div class="reporte-controls no-print">
       <label>Semana:</label>
       <div class="semana-nav">
-        <button class="nav-btn" onclick="cambiarSemana(-1)">&#8592;</button>
+        <button class="nav-btn" onclick="cambiarSemana(-1)">←</button>
         <div class="semana-label" id="semana-label">Cargando...</div>
-        <button class="nav-btn" onclick="cambiarSemana(1)">&#8594;</button>
+        <button class="nav-btn" onclick="cambiarSemana(1)">→</button>
       </div>
       <button class="btn-print" onclick="window.print()">Imprimir / PDF</button>
     </div>
@@ -379,7 +395,8 @@ tbody tr:hover td{background:var(--bg)}
 </div>
 
 <script>
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbxHNCVpPBy6bA4-RpWThwBpiYk-bXlv7Xo8e0hDfBfzqlb1tLYWYy7NBYtJukhVVugj/exec';
+// ⚡ URL ACTUALIZADO — Google Apps Script
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyiQMHp39OSWYoovS0q-NV2qxtzyrGGX8BetMY7QwPvts2beGEvKcO2O-uf0NTmPFPg/exec';
 
 let viajes = [];
 let semanaOffset = 0;
@@ -389,9 +406,19 @@ function setSyncStatus(status){
   const dot = document.getElementById('sync-dot');
   const label = document.getElementById('sync-label');
   dot.className = 'sync-dot';
-  if(status === 'syncing'){ dot.classList.add('syncing'); label.textContent = 'Sincronizando...'; }
-  else if(status === 'ok'){ label.textContent = 'Conectado · Google Sheets'; }
-  else if(status === 'error'){ dot.classList.add('error'); label.textContent = 'Sin conexion'; }
+  const banner = document.getElementById('error-banner');
+  if(status === 'syncing'){
+    dot.classList.add('syncing');
+    label.textContent = 'Sincronizando...';
+    banner.classList.remove('show');
+  } else if(status === 'ok'){
+    label.textContent = 'Conectado · Google Sheets';
+    banner.classList.remove('show');
+  } else if(status === 'error'){
+    dot.classList.add('error');
+    label.textContent = 'Sin conexión';
+    banner.classList.add('show');
+  }
 }
 
 // ===== TOAST =====
@@ -399,7 +426,7 @@ function showToast(msg, type=''){
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show' + (type?' '+type:'');
-  setTimeout(()=>t.className='toast', 3000);
+  setTimeout(()=>t.className='toast', 3500);
 }
 
 // ===== HELPERS =====
@@ -416,6 +443,7 @@ async function cargarViajes(){
   setSyncStatus('syncing');
   try{
     const res = await fetch(SHEET_URL+'?action=getAll&t='+Date.now());
+    if(!res.ok) throw new Error('HTTP '+res.status);
     const rows = await res.json();
     // rows[0] es la cabecera, ignorar
     viajes = rows.slice(1).filter(r=>r[0]).map(r=>({
@@ -435,6 +463,7 @@ async function cargarViajes(){
     renderReporte();
     renderClientes();
   } catch(e){
+    console.error('Error cargando viajes:', e);
     setSyncStatus('error');
     showToast('Error al conectar con Google Sheets', 'error');
   }
@@ -447,6 +476,7 @@ async function guardarEnSheets(viaje){
     method:'POST',
     body: JSON.stringify({action:'add', ...viaje})
   });
+  if(!res.ok) throw new Error('HTTP '+res.status);
   return res.json();
 }
 
@@ -456,6 +486,7 @@ async function eliminarEnSheets(id){
     method:'POST',
     body: JSON.stringify({action:'delete', id})
   });
+  if(!res.ok) throw new Error('HTTP '+res.status);
   return res.json();
 }
 
@@ -472,6 +503,10 @@ async function agregarViaje(){
     showToast('Completa todos los campos', 'error');
     return;
   }
+  if(cubos <= 0 || precio <= 0){
+    showToast('Cubos y precio deben ser mayores a 0', 'error');
+    return;
+  }
 
   const viaje = {
     id: String(Date.now()),
@@ -479,7 +514,6 @@ async function agregarViaje(){
     total: Math.round(cubos*precio*100)/100
   };
 
-  // UI loading
   const btn = document.getElementById('btn-guardar');
   const spinner = document.getElementById('spinner-guardar');
   const btnText = document.getElementById('btn-guardar-text');
@@ -490,17 +524,17 @@ async function agregarViaje(){
 
   try{
     await guardarEnSheets(viaje);
-    // limpiar form
     document.getElementById('f-cliente').value='';
     document.getElementById('f-camionero').value='';
     document.getElementById('f-cubos').value='';
     document.getElementById('f-precio').value='';
     document.getElementById('f-preview').textContent='S/ 0.00';
-    showToast('✓ Viaje guardado en Google Sheets', 'success');
+    showToast('✓ Viaje guardado correctamente', 'success');
     await cargarViajes();
     showPage('viajes');
   } catch(e){
-    showToast('Error al guardar. Revisa tu conexion.', 'error');
+    console.error('Error al guardar:', e);
+    showToast('Error al guardar. Revisa tu conexión.', 'error');
     setSyncStatus('error');
   } finally{
     btn.disabled = false;
@@ -511,13 +545,14 @@ async function agregarViaje(){
 
 // ===== ELIMINAR =====
 async function eliminar(id){
-  if(!confirm('¿Eliminar este viaje?')) return;
+  if(!confirm('¿Eliminar este viaje? Esta acción no se puede deshacer.')) return;
   setSyncStatus('syncing');
   try{
     await eliminarEnSheets(id);
-    showToast('Viaje eliminado', '');
+    showToast('Viaje eliminado');
     await cargarViajes();
   } catch(e){
+    console.error('Error al eliminar:', e);
     showToast('Error al eliminar', 'error');
     setSyncStatus('error');
   }
@@ -547,8 +582,8 @@ function updateStats(){
 
 // ===== DATALIST =====
 function actualizarDatalist(){
-  const clientes = [...new Set(viajes.map(v=>v.cliente))];
-  const camioneros = [...new Set(viajes.map(v=>v.camionero))];
+  const clientes = [...new Set(viajes.map(v=>v.cliente))].sort();
+  const camioneros = [...new Set(viajes.map(v=>v.camionero))].sort();
   document.getElementById('lista-clientes').innerHTML = clientes.map(c=>`<option value="${c}">`).join('');
   document.getElementById('lista-camioneros').innerHTML = camioneros.map(c=>`<option value="${c}">`).join('');
 }
@@ -569,15 +604,20 @@ function renderTabla(){
   const tbody = document.getElementById('tabla-body');
   const empty = document.getElementById('tabla-empty');
   document.getElementById('tabla-count').textContent = data.length+' viaje'+(data.length!==1?'s':'');
-  if(!data.length){ tbody.innerHTML=''; empty.style.display='block'; document.getElementById('tabla-subtotal').textContent=''; return; }
+  if(!data.length){
+    tbody.innerHTML='';
+    empty.style.display='block';
+    document.getElementById('tabla-subtotal').textContent='';
+    return;
+  }
   empty.style.display='none';
   const sub = data.reduce((a,v)=>a+v.total,0);
   document.getElementById('tabla-subtotal').textContent = 'Subtotal: '+fmt(sub);
   tbody.innerHTML = data.map(v=>`
     <tr>
       <td>${v.fecha}</td>
-      <td><strong>${v.cliente}</strong></td>
-      <td style="color:var(--muted)">${v.camionero}</td>
+      <td><strong>${escapeHtml(v.cliente)}</strong></td>
+      <td style="color:var(--muted)">${escapeHtml(v.camionero)}</td>
       <td><span class="badge ${badgeClass(v.material)}">${v.material}</span></td>
       <td style="text-align:right">${v.cubos}</td>
       <td style="text-align:right;color:var(--muted)">${fmt(v.precio)}</td>
@@ -585,6 +625,11 @@ function renderTabla(){
       <td><button class="del-btn" onclick="eliminar('${v.id}')">✕</button></td>
     </tr>
   `).join('');
+}
+
+// Previene XSS en nombres
+function escapeHtml(str){
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ===== SEMANA =====
@@ -599,7 +644,9 @@ function getWeekRange(offset=0){
   sunday.setHours(23,59,59,999);
   return {monday,sunday};
 }
-function fmtDate(d){ return d.toLocaleDateString('es-PE',{day:'numeric',month:'short'}); }
+function fmtDate(d){
+  return d.toLocaleDateString('es-PE',{day:'numeric',month:'short'});
+}
 
 function renderReporte(){
   const {monday,sunday} = getWeekRange(semanaOffset);
@@ -616,14 +663,16 @@ function renderReporte(){
   document.getElementById('r-total').textContent = fmt(data.reduce((a,v)=>a+v.total,0));
   const repBody = document.getElementById('rep-tabla-body');
   const repEmpty = document.getElementById('rep-empty');
-  if(!data.length){ repBody.innerHTML=''; repEmpty.style.display='block'; }
-  else{
+  if(!data.length){
+    repBody.innerHTML='';
+    repEmpty.style.display='block';
+  } else{
     repEmpty.style.display='none';
     repBody.innerHTML = data.map(v=>`
       <tr>
         <td>${v.fecha}</td>
-        <td><strong>${v.cliente}</strong></td>
-        <td style="color:var(--muted)">${v.camionero}</td>
+        <td><strong>${escapeHtml(v.cliente)}</strong></td>
+        <td style="color:var(--muted)">${escapeHtml(v.camionero)}</td>
         <td><span class="badge ${badgeClass(v.material)}">${v.material}</span></td>
         <td style="text-align:right">${v.cubos}</td>
         <td style="text-align:right" class="monto-col">${fmt(v.total)}</td>
@@ -638,14 +687,16 @@ function renderReporte(){
     map[v.cliente].viajes+=1;
   });
   const keys = Object.keys(map);
-  document.getElementById('rep-clientes').innerHTML = keys.length ? keys.map(k=>`
-    <div class="cliente-card">
-      <div class="cc-name">${k}</div>
-      <div class="cc-row"><span>Viajes</span><strong>${map[k].viajes}</strong></div>
-      <div class="cc-row"><span>Cubos</span><strong>${map[k].cubos%1===0?map[k].cubos:map[k].cubos.toFixed(1)}</strong></div>
-      <div class="cc-total">${fmt(map[k].total)}</div>
-    </div>
-  `).join('') : '<p style="color:var(--muted);font-size:13px">Sin datos esta semana.</p>';
+  document.getElementById('rep-clientes').innerHTML = keys.length
+    ? keys.map(k=>`
+        <div class="cliente-card">
+          <div class="cc-name">${escapeHtml(k)}</div>
+          <div class="cc-row"><span>Viajes</span><strong>${map[k].viajes}</strong></div>
+          <div class="cc-row"><span>Cubos</span><strong>${map[k].cubos%1===0?map[k].cubos:map[k].cubos.toFixed(1)}</strong></div>
+          <div class="cc-total">${fmt(map[k].total)}</div>
+        </div>
+      `).join('')
+    : '<p style="color:var(--muted);font-size:13px">Sin datos esta semana.</p>';
 }
 
 function cambiarSemana(dir){ semanaOffset+=dir; renderReporte(); }
@@ -667,7 +718,7 @@ function renderClientes(){
   empty.style.display='none';
   grid.innerHTML = keys.map(k=>`
     <div class="cliente-card">
-      <div class="cc-name">${k}</div>
+      <div class="cc-name">${escapeHtml(k)}</div>
       <div class="cc-row"><span>Viajes totales</span><strong>${map[k].viajes}</strong></div>
       <div class="cc-row"><span>Cubos totales</span><strong>${map[k].cubos%1===0?map[k].cubos:map[k].cubos.toFixed(1)}</strong></div>
       <div class="cc-row"><span>Materiales</span><strong style="font-size:11px">${[...map[k].materiales].join(', ')}</strong></div>
@@ -689,6 +740,7 @@ function exportarCSV(){
     if(fh && v.fecha>fh) return false;
     return true;
   });
+  if(!data.length){ showToast('No hay datos para exportar', 'error'); return; }
   const header = 'Fecha,Cliente,Camionero,Material,Cubos,Precio x cubo,Total\n';
   const rows = data.map(v=>`${v.fecha},"${v.cliente}","${v.camionero}",${v.material},${v.cubos},${v.precio},${v.total}`).join('\n');
   const blob = new Blob(['\uFEFF'+header+rows],{type:'text/csv;charset=utf-8;'});
@@ -696,7 +748,7 @@ function exportarCSV(){
   a.href = URL.createObjectURL(blob);
   a.download = 'agrecontrol_viajes.csv';
   a.click();
-  showToast('CSV descargado');
+  showToast('CSV descargado ✓');
 }
 
 // ===== NAV =====
