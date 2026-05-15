@@ -1,34 +1,94 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { supabase } from './lib/supabaseClient';
+import Login from './components/Login';
 import RegistroSalida from './components/RegistroSalida';
 import DashboardAdmin from './components/DashboardAdmin';
 
 function App() {
+  const [sesion, setSesion]     = useState(null);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSesion(session);
+      setCargando(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSesion(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const cerrarSesion = async () => {
+    await supabase.auth.signOut();
+  };
+
+  // ── Pantalla de carga ─────────────────────────────────────────
+  if (cargando) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui', backgroundColor: '#f3f4f6' }}>
+        <div style={{ textAlign: 'center', color: '#6b7280' }}>
+          <div style={{ fontSize: '40px', marginBottom: '12px' }}>🪨</div>
+          <div>Cargando...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Sin sesión → Login ────────────────────────────────────────
+ if (!sesion) {
+  return <Login />;
+}
+
+const usuario = sesion.user;
+console.log('USUARIO COMPLETO:', JSON.stringify(usuario));
+
+const esAdmin =
+  (usuario.user_metadata || {}).rol === 'admin' ||
+  (usuario.app_metadata || {}).rol === 'admin';
+
+console.log('ES ADMIN:', esAdmin);
+
+  // ── Con sesión → rutas protegidas por rol ────────────────────
   return (
     <Router>
       <div className="App" style={{ minHeight: '100vh', backgroundColor: '#f3f4f6' }}>
-        
-        {/* Navegación con tu estilo original mejorado */}
+
+        {/* Barra de navegación — solo admin la ve completa */}
         <nav style={navStyle}>
           <div style={navContainer}>
-            <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Agregados Llagas 🚚</h1>
-            <div style={menuStyle}>
-              <Link to="/despacho" style={linkStyle}>Choferes</Link>
-              <Link to="/admin" style={linkStyle}>Administración</Link>
+            <h1 style={{ margin: 0, fontSize: '1.4rem' }}>Agregados Llagas 🚚</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <span style={{ fontSize: '13px', opacity: 0.85 }}>
+                👤 {usuario.email}
+              </span>
+              <button onClick={cerrarSesion} style={btnLogoutStyle}>
+                Salir
+              </button>
             </div>
           </div>
         </nav>
 
         <main style={{ padding: '10px' }}>
           <Routes>
-            {/* Redirigir la raíz al despacho de choferes por defecto */}
-            <Route path="/" element={<Navigate to="/despacho" />} />
-            
-            {/* Ruta para el formulario de choferes */}
-            <Route path="/despacho" element={<RegistroSalida />} />
-            
-            {/* Ruta para el panel de tu tía */}
-            <Route path="/admin" element={<DashboardAdmin />} />
+            {esAdmin ? (
+  <>
+    <Route path="/"         element={<Navigate to="/admin" replace />} />
+    <Route path="/despacho" element={<Navigate to="/admin" replace />} />
+    <Route path="/admin"    element={<DashboardAdmin usuario={usuario} onCerrarSesion={cerrarSesion} />} />
+    <Route path="*"         element={<Navigate to="/admin" replace />} />
+  </>
+) : (
+  <>
+    <Route path="/"         element={<Navigate to="/despacho" replace />} />
+    <Route path="/admin"    element={<Navigate to="/despacho" replace />} />
+    <Route path="/despacho" element={<RegistroSalida usuario={usuario} onCerrarSesion={cerrarSesion} />} />
+    <Route path="*"         element={<Navigate to="/despacho" replace />} />
+  </>
+)}
           </Routes>
         </main>
       </div>
@@ -36,38 +96,32 @@ function App() {
   );
 }
 
-// --- TUS ESTILOS ACTUALIZADOS ---
+// ── Estilos nav ───────────────────────────────────────────────
 const navStyle = {
   backgroundColor: '#059669',
   color: 'white',
   padding: '1rem',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-  marginBottom: '20px'
+  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+  marginBottom: '20px',
 };
-
 const navContainer = {
-  maxWidth: '800px',
+  maxWidth: '1100px',
   margin: 'auto',
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
   flexWrap: 'wrap',
-  gap: '10px'
+  gap: '10px',
 };
-
-const menuStyle = {
-  display: 'flex',
-  gap: '20px'
-};
-
-const linkStyle = {
+const btnLogoutStyle = {
+  padding: '7px 14px',
+  background: 'rgba(255,255,255,0.15)',
+  border: '1px solid rgba(255,255,255,0.3)',
+  borderRadius: '8px',
   color: 'white',
-  textDecoration: 'none',
-  fontWeight: 'bold',
-  fontSize: '0.9rem',
-  padding: '5px 10px',
-  borderRadius: '5px',
-  backgroundColor: 'rgba(255,255,255,0.1)'
+  fontWeight: '600',
+  cursor: 'pointer',
+  fontSize: '13px',
 };
 
 export default App;
