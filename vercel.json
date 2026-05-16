@@ -1,5 +1,0 @@
-{
-  "installCommand": "cd agreados && pnpm install",
-  "buildCommand": "cd agreados && pnpm run build",
-  "outputDirectory": "agreados/dist"
-}
