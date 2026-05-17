@@ -483,7 +483,7 @@ const RegistroSalida = ({ usuario }) => {
         </button>
       </form>
     </div>
-  );
+  ); 
 };
 
 const containerStyle      = { maxWidth: '480px', margin: '20px auto', padding: '25px', background: '#fff', borderRadius: '15px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', fontFamily: 'system-ui, sans-serif', boxSizing: 'border-box' };
