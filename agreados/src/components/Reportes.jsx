@@ -1,359 +1,315 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import Reportes from './Reportes';
 
-const ITEMS_POR_PAGINA = 10;
+// ── Hook responsive ───────────────────────────────────────────
+const useEsMobile = () => {
+  const [esMobile, setEsMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setEsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return esMobile;
+};
 
-const DashboardAdmin = ({ usuario }) => {
-  const [vistaActiva, setVistaActiva]     = useState('dashboard');
-  const [movimientos, setMovimientos]     = useState([]);
-  const [busqueda, setBusqueda]           = useState('');
-  const [loading, setLoading]             = useState(true);
-  const [paginaActual, setPaginaActual]   = useState(1);
-  const [vistaDeudores, setVistaDeudores] = useState(false);
-  const [expandido, setExpandido]         = useState(null);
-  const [detalles, setDetalles]           = useState({});
+const Reportes = () => {
+  const esMobile = useEsMobile();
 
-  const fetchMovimientos = async () => {
+  const [filtroTiempo, setFiltroTiempo] = useState('hoy');
+  const [fechaInicio, setFechaInicio]   = useState('');
+  const [fechaFin, setFechaFin]         = useState('');
+  const [movimientos, setMovimientos]   = useState([]);
+  const [loading, setLoading]           = useState(false);
+  const [metricas, setMetricas] = useState({
+    totalFacturado: 0, cajaReal: 0, cuentasPorCobrar: 0,
+    gastoCombustible: 0, totalViajes: 0, volumenTotal: 0,
+  });
+
+  // ── Corrección zona horaria UTC-5 Perú ───────────────────────
+  const localToISO = (fecha, finDeDia = false) => {
+    const d = new Date(fecha);
+    const offset = 5 * 60 * 60 * 1000;
+    if (finDeDia) {
+      return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999) + offset).toISOString();
+    }
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) + offset).toISOString();
+  };
+
+  const obtenerFechasFiltro = useCallback(() => {
+    const ahora  = new Date();
+    const hoy    = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+    let inicioISO = '';
+    let finISO    = new Date(ahora.getTime() + 5 * 60 * 60 * 1000).toISOString();
+
+    if (filtroTiempo === 'hoy') {
+      inicioISO = localToISO(hoy);
+    } else if (filtroTiempo === 'semana') {
+      const ini = new Date(hoy);
+      const dia = ini.getDay();
+      ini.setDate(ini.getDate() - dia + (dia === 0 ? -6 : 1));
+      inicioISO = localToISO(ini);
+    } else if (filtroTiempo === 'mes') {
+      inicioISO = localToISO(new Date(ahora.getFullYear(), ahora.getMonth(), 1));
+    } else if (filtroTiempo === 'personalizado') {
+      if (fechaInicio) inicioISO = localToISO(new Date(fechaInicio + 'T00:00:00'));
+      if (fechaFin)    finISO    = localToISO(new Date(fechaFin    + 'T00:00:00'), true);
+    }
+    return { inicioISO, finISO };
+  }, [filtroTiempo, fechaInicio, fechaFin]);
+
+  const cargarReportes = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('movimientos')
-      .select('*')
-      .order('creado_en', { ascending: false });
-    if (!error) setMovimientos(data || []);
-    setLoading(false);
-  };
+    try {
+      const { inicioISO, finISO } = obtenerFechasFiltro();
+      let query = supabase.from('movimientos').select('*').order('creado_en', { ascending: false });
+      if (inicioISO) query = query.gte('creado_en', inicioISO);
+      if (finISO)    query = query.lte('creado_en', finISO);
 
-  useEffect(() => { fetchMovimientos(); }, []);
+      const { data, error } = await query;
+      if (error) throw error;
 
-  const toggleDetalle = async (id) => {
-    if (expandido === id) { setExpandido(null); return; }
-    setExpandido(id);
-    if (!detalles[id]) {
-      const { data } = await supabase
-        .from('detalle_movimientos')
-        .select('*')
-        .order('id', { ascending: true })
-        .eq('movimiento_id', id);
-      setDetalles(prev => ({ ...prev, [id]: data || [] }));
+      if (data) {
+        setMovimientos(data);
+        let facturado = 0, caja = 0, porCobrar = 0, combustible = 0, volumen = 0;
+        data.forEach(mov => {
+          const total    = parseFloat(mov.monto_total)       || 0;
+          const recibido = parseFloat(mov.monto_recibido)    || 0;
+          const gas      = parseFloat(mov.gasto_combustible) || 0;
+          const cubos    = parseFloat(mov.cantidad_cubos)    || 0;
+          facturado   += total;
+          caja        += recibido;
+          porCobrar   += (total - recibido);
+          combustible += gas;
+          volumen     += cubos;
+        });
+        setMetricas({ totalFacturado: facturado, cajaReal: caja, cuentasPorCobrar: porCobrar, gastoCombustible: combustible, totalViajes: data.length, volumenTotal: volumen });
+      }
+    } catch (err) {
+      console.error('Error cargando reportes:', err.message);
+      alert('Error al conectar con la base de datos.');
+    } finally {
+      setLoading(false);
     }
+  }, [obtenerFechasFiltro]);
+
+  useEffect(() => { cargarReportes(); }, [cargarReportes, filtroTiempo]);
+
+  // ── Exportar CSV ──────────────────────────────────────────────
+  const exportarExcel = () => {
+    if (movimientos.length === 0) return alert('No hay registros para exportar en este rango.');
+    const encabezados = ['Fecha y Hora','Cliente','Celular','Materiales','Volumen (m3)','Total Venta (S/)','Monto Cobrado (S/)','Saldo Pendiente (S/)','Estado de Pago','Gasto Combustible (S/)'];
+    const filas = movimientos.map(mov => {
+      const total    = parseFloat(mov.monto_total)    || 0;
+      const recibido = parseFloat(mov.monto_recibido) || 0;
+      return [
+        `"${new Date(mov.creado_en).toLocaleString('es-PE')}"`,
+        `"${mov.cliente_nombre.toUpperCase()}"`,
+        `"${mov.cliente_celular || 'Sin Registro'}"`,
+        `"${mov.material_tipo  || 'Agregados'}"`,
+        mov.cantidad_cubos,
+        total.toFixed(2), recibido.toFixed(2), (total - recibido).toFixed(2),
+        `"${mov.estado_pago}"`,
+        (parseFloat(mov.gasto_combustible) || 0).toFixed(2),
+      ];
+    });
+    const csv  = [encabezados.join(';'), ...filas.map(f => f.join(';'))].join('\n');
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href  = url;
+    link.setAttribute('download', `Reporte_${filtroTiempo}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const marcarComoPagado = async (id, total) => {
-    const { error } = await supabase
-      .from('movimientos')
-      .update({ monto_recibido: total, estado_pago: 'Pagado' })
-      .eq('id', id);
-    if (error) alert('Error al actualizar');
-    else fetchMovimientos();
+  const badgeEstado = (estado) => {
+    const base = { padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold' };
+    if (estado === 'Pagado')   return { ...base, backgroundColor: '#dcfce7', color: '#15803d' };
+    if (estado === 'Adelanto') return { ...base, backgroundColor: '#fef3c7', color: '#b45309' };
+    return { ...base, backgroundColor: '#fee2e2', color: '#b91c1c' };
   };
 
-  const eliminarRegistro = async (id) => {
-    if (!window.confirm('¿Estás segura de eliminar este registro?')) return;
-    const { error } = await supabase.from('movimientos').delete().eq('id', id);
-    if (error) {
-      alert('Error al eliminar');
-    } else {
-      fetchMovimientos();
-      setDetalles(prev => { const n = { ...prev }; delete n[id]; return n; });
-      if (expandido === id) setExpandido(null);
-    }
+  // ── Tarjeta móvil por movimiento ──────────────────────────────
+  const TarjetaMovilReporte = ({ mov }) => {
+    const vTotal    = parseFloat(mov.monto_total)    || 0;
+    const vRecibido = parseFloat(mov.monto_recibido) || 0;
+    const vPend     = vTotal - vRecibido;
+
+    return (
+      <div style={{ ...tarjetaMovilStyle, borderLeft: vPend > 0 ? '4px solid #dc2626' : '4px solid #059669' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+          <div style={{ flex: 1, paddingRight: '10px' }}>
+            <div style={{ fontWeight: '700', fontSize: '15px', color: '#111827' }}>
+              {mov.cliente_nombre.toUpperCase()}
+            </div>
+            <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+              {new Date(mov.creado_en).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })}
+            </div>
+          </div>
+          <span style={badgeEstado(mov.estado_pago)}>{mov.estado_pago}</span>
+        </div>
+
+        <div style={{ marginBottom: '8px' }}>
+          <span style={chipStyle}>🪨 {mov.material_tipo || 'Varios'}</span>
+          <span style={{ ...chipStyle, marginLeft: '6px' }}>{parseFloat(mov.cantidad_cubos).toFixed(1)} m³</span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+          <div style={miniKpiStyle}>
+            <span style={{ fontSize: '10px', color: '#6b7280' }}>Venta</span>
+            <strong style={{ fontSize: '13px', color: '#111827' }}>S/ {vTotal.toFixed(2)}</strong>
+          </div>
+          <div style={miniKpiStyle}>
+            <span style={{ fontSize: '10px', color: '#6b7280' }}>Cobrado</span>
+            <strong style={{ fontSize: '13px', color: '#059669' }}>S/ {vRecibido.toFixed(2)}</strong>
+          </div>
+          <div style={miniKpiStyle}>
+            <span style={{ fontSize: '10px', color: '#6b7280' }}>Pendiente</span>
+            <strong style={{ fontSize: '13px', color: vPend > 0 ? '#dc2626' : '#6b7280' }}>
+              S/ {vPend.toFixed(2)}
+            </strong>
+          </div>
+        </div>
+      </div>
+    );
   };
-
-  // ── Cálculos ─────────────────────────────────────────────────
-  const totalCaja     = movimientos.reduce((acc, m) => acc + (Number(m.monto_recibido) || 0), 0);
-  const totalDeuda    = movimientos.reduce((acc, m) => acc + Math.max(0, Number(m.monto_total) - Number(m.monto_recibido)), 0);
-  const totalDeudores = movimientos.filter(m => (Number(m.monto_total) - Number(m.monto_recibido)) > 0).length;
-
-  // ── Filtrado ─────────────────────────────────────────────────
-  let lista = movimientos.filter(m =>
-    m.cliente_nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
-  if (vistaDeudores) lista = lista.filter(m => (Number(m.monto_total) - Number(m.monto_recibido)) > 0);
-
-  // ── Paginación ────────────────────────────────────────────────
-  const totalPaginas = Math.max(1, Math.ceil(lista.length / ITEMS_POR_PAGINA));
-  const paginaSegura = Math.min(paginaActual, totalPaginas);
-  const inicio       = (paginaSegura - 1) * ITEMS_POR_PAGINA;
-  const paginados    = lista.slice(inicio, inicio + ITEMS_POR_PAGINA);
-
-  const cambiarBusqueda = (v) => { setBusqueda(v); setPaginaActual(1); };
-  const toggleDeudores  = ()  => { setVistaDeudores(v => !v); setPaginaActual(1); };
 
   return (
-    <div style={wrapStyle}>
+    <div style={containerStyle}>
 
-      {/* Pestañas */}
-      <div style={menuTabsStyle}>
-        <button onClick={() => setVistaActiva('dashboard')} style={vistaActiva === 'dashboard' ? tabActivoStyle : tabInactivoStyle}>
-          🎛️ Panel de Control
-        </button>
-        <button onClick={() => setVistaActiva('reportes')} style={vistaActiva === 'reportes' ? tabActivoStyle : tabInactivoStyle}>
-          📊 Reportes y Excel
-        </button>
+      {/* Encabezado */}
+      <div style={headerStyle}>
+        <div>
+          <h2 style={{ margin: 0, color: '#065f46', fontSize: esMobile ? '17px' : '20px' }}>📊 Reportes y Contabilidad</h2>
+          <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '13px' }}>Control de ventas para administración</p>
+        </div>
+        <button onClick={exportarExcel} style={btnExcelStyle}>🟢 {esMobile ? 'Excel' : 'Exportar Excel'}</button>
       </div>
 
-      {vistaActiva === 'reportes' ? (
-        <Reportes />
-      ) : (
-        <>
-          {/* Tarjetas KPI */}
-          <div style={gridStyle}>
-            <div style={{ ...cardStyle, borderLeft: '5px solid #059669', background: '#ecfdf5' }}>
-              <small style={{ color: '#065f46', fontWeight: 600 }}>💰 Dinero en Mano</small>
-              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#065f46', margin: '4px 0' }}>
-                S/ {totalCaja.toFixed(2)}
-              </div>
-              <small style={{ color: '#6b7280' }}>Total cobrado</small>
-            </div>
-
-            <div
-              onClick={toggleDeudores}
-              style={{
-                ...cardStyle,
-                borderLeft: '5px solid #dc2626',
-                background: vistaDeudores ? '#fca5a5' : '#fef2f2',
-                cursor: 'pointer',
-                outline: vistaDeudores ? '2px solid #dc2626' : 'none',
-              }}
-              title="Clic para ver deudores"
-            >
-              <small style={{ color: '#991b1b', fontWeight: 600 }}>
-                {vistaDeudores ? '👁️ Viendo deudores — clic para volver' : '⚠️ Total por Cobrar'}
-              </small>
-              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#991b1b', margin: '4px 0' }}>
-                S/ {totalDeuda.toFixed(2)}
-              </div>
-              <small style={{ color: '#6b7280' }}>
-                {totalDeudores} {totalDeudores === 1 ? 'persona debe' : 'personas deben'}
-              </small>
-            </div>
+      {/* Filtros de tiempo */}
+      <div style={filtroBoxStyle}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {[['hoy','Hoy'], ['semana','Semana'], ['mes','Mes'], ['personalizado','Rango 📅']].map(([val, label]) => (
+            <button key={val} onClick={() => setFiltroTiempo(val)}
+              style={filtroTiempo === val ? btnActivo : btnInactivo}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {filtroTiempo === 'personalizado' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+            <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} style={inputDateStyle} />
+            <span style={{ color: '#6b7280', fontSize: '13px' }}>hasta</span>
+            <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} style={inputDateStyle} />
+            <button onClick={cargarReportes} style={btnCalcular}>Calcular</button>
           </div>
+        )}
+      </div>
 
-          {/* Banner deudores */}
-          {vistaDeudores && (
-            <div style={bannerDeudoresStyle}>
-              🔴 Mostrando solo clientes con saldo pendiente — {totalDeudores} {totalDeudores === 1 ? 'deudor' : 'deudores'}
-              <button onClick={toggleDeudores} style={btnClearStyle}>✕ Quitar filtro</button>
-            </div>
-          )}
-
-          {/* Buscador */}
-          <div style={{ marginBottom: '16px', display: 'flex', gap: '10px' }}>
-            <input
-              type="text"
-              placeholder="🔍 Buscar cliente..."
-              style={inputBusqueda}
-              value={busqueda}
-              onChange={(e) => cambiarBusqueda(e.target.value)}
-            />
-            <button onClick={fetchMovimientos} style={btnRefresh}>↻ Actualizar</button>
+      {/* KPIs — 2 columnas en móvil, 4 en desktop */}
+      <div style={{ display: 'grid', gridTemplateColumns: esMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
+        {[
+          { titulo: '💰 FACTURADO',   monto: metricas.totalFacturado,    color: '#065f46', borde: '#059669', sub: 'Monto bruto total' },
+          { titulo: '💵 CAJA REAL',   monto: metricas.cajaReal,          color: '#1d4ed8', borde: '#2563eb', sub: 'Efectivo cobrado' },
+          { titulo: '⚠️ POR COBRAR',  monto: metricas.cuentasPorCobrar,  color: '#b91c1c', borde: '#dc2626', sub: 'Saldos pendientes' },
+          { titulo: '⛽ COMBUSTIBLE', monto: metricas.gastoCombustible,  color: '#b45309', borde: '#d97706', sub: 'Gasto de ruta' },
+        ].map(({ titulo, monto, color, borde, sub }) => (
+          <div key={titulo} style={{ ...cardKpiStyle, borderLeft: `4px solid ${borde}` }}>
+            <span style={cardTituloStyle}>{titulo}</span>
+            <strong style={{ fontSize: esMobile ? '18px' : '22px', fontWeight: '800', margin: '4px 0 2px', color }}>
+              S/ {monto.toFixed(2)}
+            </strong>
+            <span style={cardSubStyle}>{sub}</span>
           </div>
+        ))}
+      </div>
 
-          {/* Tabla */}
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>Cargando...</div>
-          ) : lista.length === 0 ? (
-            <div style={emptyStyle}>
-              {vistaDeudores ? '🎉 ¡No hay deudas pendientes!' : 'No se encontraron registros.'}
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto', borderRadius: '10px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.08)' }}>
-              <table style={tableStyle}>
-                <thead style={{ backgroundColor: '#f3f4f6' }}>
-                  <tr>
-                    {['Cliente', 'Materiales', 'm³', 'Total', 'Saldo', 'Registrado por', 'Acciones'].map(h => (
-                      <th key={h} style={th}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginados.map((m) => {
-                    const saldo      = Number(m.monto_total) - Number(m.monto_recibido);
-                    const tieneSaldo = saldo > 0;
-                    const abierto    = expandido === m.id;
+      {/* Banner logístico */}
+      <div style={bannerStyle}>
+        <strong>{metricas.totalViajes} despachos</strong> · <strong>{metricas.volumenTotal.toFixed(1)} m³</strong> en este período
+      </div>
 
-                    return (
-                      <React.Fragment key={m.id}>
-                        <tr style={{ borderBottom: '1px solid #f3f4f6', background: tieneSaldo ? '#fff9f9' : '#fff' }}>
-                          <td style={td}>
-                            <strong style={{ color: '#111827' }}>{m.cliente_nombre}</strong><br />
-                            <small style={{ color: '#9ca3af' }}>
-                              {new Date(m.creado_en).toLocaleDateString('es-PE')}
-                              {' · '}
-                              {new Date(m.creado_en).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
-                            </small>
-                          </td>
+      {/* Lista / Tabla */}
+      <div style={tablaCardStyle}>
+        <h3 style={{ margin: '0 0 15px', color: '#374151', fontSize: '15px' }}>📋 Listado de Despachos</h3>
 
-                          <td style={td}>
-                            <button onClick={() => toggleDetalle(m.id)} style={btnDetalleStyle}>
-                              🪨 {m.material_tipo || '—'}
-                              <span style={{ marginLeft: '6px', fontSize: '10px' }}>{abierto ? '▲' : '▼'}</span>
-                            </button>
-                          </td>
-
-                          <td style={{ ...td, textAlign: 'center' }}>{Number(m.cantidad_cubos).toFixed(1)}</td>
-                          <td style={td}>S/ {Number(m.monto_total).toFixed(2)}</td>
-                          <td style={{ ...td, fontWeight: 'bold', color: tieneSaldo ? '#dc2626' : '#059669' }}>
-                            {tieneSaldo ? `S/ ${saldo.toFixed(2)}` : '✅ PAGADO'}
-                          </td>
-                          <td style={td}>
-                            <span style={usuarioBadgeStyle}>{m.usuario_email || '—'}</span>
-                          </td>
-                          <td style={td}>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {tieneSaldo && (
-                                <button onClick={() => marcarComoPagado(m.id, m.monto_total)} style={btnCobrar}>
-                                  ✅ Cobrar
-                                </button>
-                              )}
-                              <button onClick={() => eliminarRegistro(m.id)} style={btnEliminar}>🗑️</button>
-                            </div>
-                          </td>
-                        </tr>
-
-                        {abierto && (
-                          <tr style={{ background: '#f9fafb' }}>
-                            <td colSpan={7} style={{ padding: '0 15px 15px' }}>
-                              <div style={detalleBoxStyle}>
-                                <strong style={{ fontSize: '13px', color: '#065f46', display: 'block', marginBottom: '8px' }}>
-                                  📦 Detalle de materiales despachados
-                                </strong>
-                                {!detalles[m.id] ? (
-                                  <div style={{ color: '#9ca3af', fontSize: '13px' }}>Cargando...</div>
-                                ) : detalles[m.id].length === 0 ? (
-                                  <div style={{ color: '#9ca3af', fontSize: '13px' }}>Sin detalle registrado</div>
-                                ) : (
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                                    <thead>
-                                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                        <th style={thSmall}>Material</th>
-                                        <th style={{ ...thSmall, textAlign: 'center' }}>Cantidad</th>
-                                        <th style={{ ...thSmall, textAlign: 'right' }}>Precio x m³</th>
-                                        <th style={{ ...thSmall, textAlign: 'right' }}>Subtotal</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {detalles[m.id].map(d => (
-                                        <tr key={d.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                          <td style={tdSmall}>🪨 {d.material_tipo}</td>
-                                          <td style={{ ...tdSmall, textAlign: 'center' }}>{Number(d.cantidad).toFixed(1)} m³</td>
-                                          <td style={{ ...tdSmall, textAlign: 'right' }}>S/ {Number(d.precio_unitario).toFixed(2)}</td>
-                                          <td style={{ ...tdSmall, textAlign: 'right', fontWeight: '600', color: '#059669' }}>
-                                            S/ {Number(d.subtotal).toFixed(2)}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                    <tfoot>
-                                      <tr>
-                                        <td colSpan={3} style={{ ...tdSmall, textAlign: 'right', fontWeight: '700', paddingTop: '8px' }}>Total:</td>
-                                        <td style={{ ...tdSmall, textAlign: 'right', fontWeight: '700', color: '#065f46', paddingTop: '8px' }}>
-                                          S/ {Number(m.monto_total).toFixed(2)}
-                                        </td>
-                                      </tr>
-                                    </tfoot>
-                                  </table>
-                                )}
-                                {m.gasto_combustible > 0 && (
-                                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280' }}>
-                                    ⛽ Gasto combustible: S/ {Number(m.gasto_combustible).toFixed(2)}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Paginación */}
-          {totalPaginas > 1 && (
-            <div style={paginacionStyle}>
-              <button
-                onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
-                disabled={paginaSegura === 1}
-                style={{ ...btnPagStyle, opacity: paginaSegura === 1 ? 0.4 : 1 }}
-              >
-                ← Anterior
-              </button>
-
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                {Array.from({ length: totalPaginas }, (_, i) => i + 1)
-                  .filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1)
-                  .reduce((acc, p, idx, arr) => {
-                    if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
-                    acc.push(p);
-                    return acc;
-                  }, [])
-                  .map((item, idx) =>
-                    item === '...'
-                      ? <span key={`e${idx}`} style={{ color: '#9ca3af', padding: '0 4px' }}>…</span>
-                      : <button
-                          key={item}
-                          onClick={() => setPaginaActual(item)}
-                          style={{
-                            ...btnPagStyle,
-                            background: item === paginaSegura ? '#059669' : '#f3f4f6',
-                            color:      item === paginaSegura ? '#fff'    : '#374151',
-                            fontWeight: item === paginaSegura ? '700'     : '400',
-                            minWidth: '36px',
-                          }}
-                        >
-                          {item}
-                        </button>
-                  )}
-              </div>
-
-              <button
-                onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
-                disabled={paginaSegura === totalPaginas}
-                style={{ ...btnPagStyle, opacity: paginaSegura === totalPaginas ? 0.4 : 1 }}
-              >
-                Siguiente →
-              </button>
-            </div>
-          )}
-
-          {lista.length > 0 && (
-            <div style={{ textAlign: 'center', fontSize: '13px', color: '#9ca3af', marginTop: '12px' }}>
-              Mostrando {inicio + 1}–{Math.min(inicio + ITEMS_POR_PAGINA, lista.length)} de {lista.length} registros
-            </div>
-          )}
-        </>
-      )}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '25px', color: '#6b7280' }}>Cargando datos...</div>
+        ) : movimientos.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '25px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px' }}>
+            No hay registros para este filtro.
+          </div>
+        ) : esMobile ? (
+          // ── VISTA MÓVIL: tarjetas ─────────────────────────────
+          <div>
+            {movimientos.map(mov => <TarjetaMovilReporte key={mov.id} mov={mov} />)}
+          </div>
+        ) : (
+          // ── VISTA DESKTOP: tabla ──────────────────────────────
+          <div style={{ overflowX: 'auto' }}>
+            <table style={tablaStyle}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  {['Fecha / Hora','Cliente','Material','m³','Venta','Cobrado','Pendiente','Estado'].map(h => (
+                    <th key={h} style={thStyle}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movimientos.map(mov => {
+                  const vTotal    = parseFloat(mov.monto_total)    || 0;
+                  const vRecibido = parseFloat(mov.monto_recibido) || 0;
+                  const vPend     = vTotal - vRecibido;
+                  return (
+                    <tr key={mov.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td style={tdStyle}>
+                        {new Date(mov.creado_en).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </td>
+                      <td style={{ ...tdStyle, fontWeight: '600' }}>{mov.cliente_nombre.toUpperCase()}</td>
+                      <td style={tdStyle}>{mov.material_tipo || 'Varios'}</td>
+                      <td style={tdStyle}>{parseFloat(mov.cantidad_cubos).toFixed(1)}</td>
+                      <td style={tdStyle}>S/ {vTotal.toFixed(2)}</td>
+                      <td style={{ ...tdStyle, color: '#047857' }}>S/ {vRecibido.toFixed(2)}</td>
+                      <td style={{ ...tdStyle, color: vPend > 0 ? '#b91c1c' : '#374151', fontWeight: vPend > 0 ? '600' : 'normal' }}>
+                        {vPend > 0 ? `S/ ${vPend.toFixed(2)}` : 'S/ 0.00'}
+                      </td>
+                      <td style={tdStyle}>
+                        <span style={badgeEstado(mov.estado_pago)}>{mov.estado_pago}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
 // ── Estilos ────────────────────────────────────────────────────
-const menuTabsStyle     = { display: 'flex', gap: '10px', marginBottom: '22px', borderBottom: '2px solid #f3f4f6', paddingBottom: '10px' };
-const tabInactivoStyle  = { padding: '10px 16px', background: '#f9fafb', color: '#4b5563', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '500' };
-const tabActivoStyle    = { padding: '10px 16px', background: '#065f46', color: '#ffffff', border: '1px solid #065f46', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(6,95,70,0.15)' };
-const wrapStyle         = { maxWidth: '1100px', margin: 'auto', padding: '20px', fontFamily: 'system-ui, sans-serif' };
-const gridStyle         = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px' };
-const cardStyle         = { padding: '20px', borderRadius: '12px' };
-const inputBusqueda     = { flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' };
-const btnRefresh        = { padding: '10px 20px', backgroundColor: '#374151', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' };
-const tableStyle        = { width: '100%', borderCollapse: 'collapse', backgroundColor: 'white' };
-const th                = { padding: '12px 15px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' };
-const td                = { padding: '14px 15px', textAlign: 'left', fontSize: '14px', verticalAlign: 'middle' };
-const thSmall           = { padding: '6px 8px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' };
-const tdSmall           = { padding: '6px 8px', fontSize: '13px', verticalAlign: 'middle' };
-const btnCobrar         = { backgroundColor: '#059669', color: 'white', border: 'none', padding: '7px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' };
-const btnEliminar       = { backgroundColor: '#fee2e2', color: '#b91c1c', border: 'none', padding: '7px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' };
-const btnDetalleStyle   = { background: '#f3f4f6', border: 'none', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', fontSize: '12px', color: '#374151', fontWeight: '600', whiteSpace: 'nowrap' };
-const detalleBoxStyle   = { background: '#fff', borderRadius: '10px', padding: '14px', border: '1px solid #e5e7eb', marginTop: '4px' };
-const usuarioBadgeStyle = { display: 'inline-block', background: '#ede9fe', borderRadius: '6px', padding: '3px 8px', fontSize: '11px', color: '#5b21b6', fontWeight: '600', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
-const bannerDeudoresStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', fontSize: '14px', color: '#991b1b', fontWeight: '600' };
-const btnClearStyle     = { background: 'none', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', color: '#dc2626', fontSize: '13px' };
-const emptyStyle        = { textAlign: 'center', padding: '40px', color: '#6b7280', background: '#f9fafb', borderRadius: '10px', fontSize: '15px' };
-const paginacionStyle   = { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '20px', flexWrap: 'wrap' };
-const btnPagStyle       = { padding: '8px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: '#f3f4f6', color: '#374151', fontSize: '14px' };
+const containerStyle  = { maxWidth: '1050px', margin: '0 auto', padding: '16px', background: '#ffffff', borderRadius: '14px', fontFamily: 'system-ui, sans-serif', boxSizing: 'border-box' };
+const headerStyle     = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #edf2f7', paddingBottom: '14px', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' };
+const btnExcelStyle   = { backgroundColor: '#059669', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' };
+const filtroBoxStyle  = { backgroundColor: '#f9fafb', padding: '12px 14px', borderRadius: '10px', marginBottom: '18px', border: '1px solid #f3f4f6' };
+const btnInactivo     = { background: '#fff', color: '#4b5563', border: '1px solid #d1d5db', padding: '7px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' };
+const btnActivo       = { background: '#065f46', color: '#fff', border: '1px solid #065f46', padding: '7px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' };
+const inputDateStyle  = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' };
+const btnCalcular     = { background: '#4b5563', color: '#fff', border: 'none', padding: '7px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' };
+const cardKpiStyle    = { backgroundColor: '#fff', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', border: '1px solid #e5e7eb', boxSizing: 'border-box' };
+const cardTituloStyle = { fontSize: '11px', color: '#6b7280', fontWeight: 'bold', letterSpacing: '0.4px' };
+const cardSubStyle    = { fontSize: '11px', color: '#a0aec0' };
+const bannerStyle     = { backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', color: '#1e293b', marginBottom: '18px' };
+const tablaCardStyle  = { backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px' };
+const tablaStyle      = { width: '100%', borderCollapse: 'collapse', fontSize: '13px' };
+const thStyle         = { padding: '11px 12px', borderBottom: '2px solid #e5e7eb', color: '#4b5563', fontWeight: '600', textAlign: 'left', whiteSpace: 'nowrap' };
+const tdStyle         = { padding: '11px 12px', borderBottom: '1px solid #f3f4f6', color: '#374151' };
+//movil
+// Estilos tarjeta móvil
+const tarjetaMovilStyle = { backgroundColor: '#fff', borderRadius: '12px', padding: '14px', marginBottom: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #e5e7eb' };
+const chipStyle         = { display: 'inline-block', background: '#f3f4f6', borderRadius: '20px', padding: '3px 10px', fontSize: '12px', color: '#374151' };
+const miniKpiStyle      = { backgroundColor: '#f9fafb', borderRadius: '8px', padding: '8px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '2px', border: '1px solid #e5e7eb' };
 
-export default DashboardAdmin;
+export default Reportes;
