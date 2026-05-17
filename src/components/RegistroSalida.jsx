@@ -485,7 +485,7 @@ const RegistroSalida = ({ usuario }) => {
     </div>
   ); 
 };
-
+//esto debe ingresar
 const containerStyle      = { maxWidth: '480px', margin: '20px auto', padding: '25px', background: '#fff', borderRadius: '15px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', fontFamily: 'system-ui, sans-serif', boxSizing: 'border-box' };
 const btnVolverStyle      = { background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 14px', cursor: 'pointer', fontSize: '13px', color: '#374151', fontWeight: '600' };
 const panelRendimientoStyle = { backgroundColor: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: '12px', padding: '15px', marginBottom: '16px', boxSizing: 'border-box' };

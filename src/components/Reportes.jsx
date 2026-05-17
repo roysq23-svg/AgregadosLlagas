@@ -306,7 +306,7 @@ const tablaCardStyle  = { backgroundColor: '#fff', border: '1px solid #e5e7eb', 
 const tablaStyle      = { width: '100%', borderCollapse: 'collapse', fontSize: '13px' };
 const thStyle         = { padding: '11px 12px', borderBottom: '2px solid #e5e7eb', color: '#4b5563', fontWeight: '600', textAlign: 'left', whiteSpace: 'nowrap' };
 const tdStyle         = { padding: '11px 12px', borderBottom: '1px solid #f3f4f6', color: '#374151' };
-
+//movil
 // Estilos tarjeta móvil
 const tarjetaMovilStyle = { backgroundColor: '#fff', borderRadius: '12px', padding: '14px', marginBottom: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #e5e7eb' };
 const chipStyle         = { display: 'inline-block', background: '#f3f4f6', borderRadius: '20px', padding: '3px 10px', fontSize: '12px', color: '#374151' };

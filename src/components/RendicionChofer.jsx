@@ -299,5 +299,5 @@ const btnGuardarGastoStyle  = { width: '100%', padding: '12px', backgroundColor:
 const btnAgregarGastoStyle  = { backgroundColor: '#f0fdf4', color: '#059669', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' };
 const filaGastoStyle        = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f3f4f6' };
 const btnEliminarStyle      = { background: '#fee2e2', color: '#b91c1c', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' };
-
+//hola
 export default RendicionChofer;
